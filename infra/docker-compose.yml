@@ -1,0 +1,117 @@
+services:
+  # =====================================================
+  # PostgreSQL + PostGIS
+  # =====================================================
+  database:
+    image: postgis/postgis:16-3.4
+    restart: always
+    container_name: database
+    volumes:
+      - db_docker:/var/lib/postgresql/data
+      - ../backend/scripts/create-dbs.sql:/docker-entrypoint-initdb.d/create-dbs.sql
+    ports:
+      - 5454:5432
+    expose:
+      - 5432
+    environment:
+      - POSTGRES_USER=${DATABASE_USER}
+      - POSTGRES_PASSWORD=${DATABASE_PASSWORD}
+      - POSTGRES_DB=${DATABASE_NAME}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # =====================================================
+  # Redis
+  # =====================================================
+  redis_server:
+    image: redis:alpine
+    container_name: redis_server
+    restart: always
+    expose:
+      - 6379
+
+  # =====================================================
+  # MinIO（系统唯一 MinIO）
+  # =====================================================
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    restart: always
+    container_name: minio
+    volumes:
+      - ../minio/data:/data
+    expose:
+      - 9000
+      - 9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BROWSER_REDIRECT_URL: http://stash.localhost
+    command: "server /data --console-address ':9001'"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      default:
+        aliases:
+          - minio
+
+  # =====================================================
+  # FastAPI Backend
+  # =====================================================
+  fastapi_server:
+    container_name: fastapi_server
+    image: project-app:latest
+    restart: always
+    command: >
+        sh -c "
+          wait-for-it database:5432 --timeout=30 --strict &&
+          alembic upgrade head &&
+          uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+        "
+    env_file: "../.env"
+    environment:
+      - MILVUS_HOST=host.docker.internal
+      - MILVUS_PORT=19530
+      - MINIO_INTERNAL_URL=minio:9000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      database:
+        condition: service_healthy
+    expose:
+      - 8000
+    volumes:
+      - ../backend:/code
+
+  # =====================================================
+  # Caddy Reverse Proxy
+  # =====================================================
+  caddy_reverse_proxy:
+    container_name: caddy_reverse_proxy
+    image: caddy:alpine
+    restart: always
+    ports:
+      - 8080:80
+      - 8443:443
+    environment:
+      - EXT_ENDPOINT1=${EXT_ENDPOINT1}
+      - LOCAL_1=${LOCAL_1}
+      - LOCAL_2=${LOCAL_2}
+    volumes:
+      - ./caddy:/etc/caddy
+      - ../backend/static:/code/static
+      - caddy_data:/data
+      - caddy_config:/config
+
+# =====================================================
+# Volumes
+# =====================================================
+volumes:
+  db_docker:
+  caddy_data:
+  caddy_config:

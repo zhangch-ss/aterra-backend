@@ -1,0 +1,48 @@
+# General
+.git
+.gitignore
+.vscode
+.idea
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+dist/
+build/
+*.egg-info/
+
+# Python & env
+.venv/
+venv/
+ENV/
+env/
+
+# Local env/config
+.env
+.env.*
+!.env.example
+
+# Project specific
+work/
+logs/
+*.log
+uploads/
+static/uploads/
+minio-data/
+alembic_backup/
+
+# OS/Editor junk
+.DS_Store
+Thumbs.db
+
+# Large data
+*.csv
+*.xlsx
+*.xls
+*.parquet
+
+# Tests and docs (exclude from image context to speed up build)
+tests/
+docs/

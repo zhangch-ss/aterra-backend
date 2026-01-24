@@ -1,0 +1,32 @@
+FROM python:3.11-slim
+
+# 1. 保持官方 Debian 源（禁用镜像源替换以避免 502/未签名问题）
+# 原镜像源替换已移除
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_DEFAULT_TIMEOUT=100 \
+    POETRY_HOME=/opt/poetry \
+    PATH="/opt/poetry/bin:${PATH}"
+
+# 2. 安装系统依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    build-essential \
+    gcc \
+    libpq-dev \
+    libjpeg-dev \
+    zlib1g-dev \
+    libpng-dev \
+    libgeos-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 3. pip → 清华源
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip config set install.trusted-host pypi.tuna.tsinghua.edu.cn
+
+# 4. 安装 Poetry
+RUN curl -sSL https://install.python-poetry.org | python && \
+    poetry config virtualenvs.create false && \
+    poetry config repositories.tuna https://pypi.tuna.tsinghua.edu.cn/simple
+
+WORKDIR /code
