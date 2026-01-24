@@ -35,7 +35,6 @@ pip install -r requirements.txt
 复制 .env.example 到 .env，并按需修改。关键项：
 - 数据库：DATABASE_*（Postgres）
 - Redis：REDIS_*
-- OpenAI/Azure OpenAI：OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, OPENAI_API_VERSION
 - MinIO：MINIO_*
 - CORS：BACKEND_CORS_ORIGINS（开发环境可设置为 http://localhost:3000）
 - 生产环境务必显式设置 SECRET_KEY、ENCRYPT_KEY

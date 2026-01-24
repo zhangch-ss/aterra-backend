@@ -220,12 +220,6 @@ class ModelService:
             else:
                 azure_endpoint = self.derive_azure_endpoint(base_url)
         api_version = creds.get("api_version") or (cfg.client.api_version if getattr(cfg, "client", None) else None)
-        if not api_version and p_lower in ("azure", "azure-openai"):
-            try:
-                api_version = settings.OPENAI_API_VERSION
-            except Exception:
-                api_version = None
-
 
         start = time.time()
         p = prov.lower()

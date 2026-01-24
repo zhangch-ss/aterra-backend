@@ -15,15 +15,6 @@ import json
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Callable, Optional
 
-# ============================================================
-# 配置：是否使用真实 OpenAI/Azure OpenAI API（通过环境变量控制）
-# - 为避免泄露，默认不启用真实 API 调用。
-# - 如需启用，请设置：
-#     USE_OPENAI=true
-#     AZURE_OPENAI_ENDPOINT=...
-#     OPENAI_API_KEY=...
-#     OPENAI_API_VERSION=2024-07-01-preview
-# ============================================================
 import os
 
 use_openai = os.getenv("USE_OPENAI", "false").lower() in {"1", "true", "yes"}

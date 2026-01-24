@@ -191,7 +191,8 @@ async def summarize_session_title(session_id: str, req: SummarizeRequest, db: As
         db_prompt = await crud_prompt.get_system_prompt_by_name(name="SUMMARIZE_TITLE", db_session=db)
         prompt_template = db_prompt.content if db_prompt else SUMMARIZE_TITLE
         prompt = prompt_template.format(context_text=req.query)
-        print(settings)
+
+        # TODO 改为根据请求参数初始化client
         client = AzureOpenAI(
             azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
             api_key=settings.OPENAI_API_KEY,

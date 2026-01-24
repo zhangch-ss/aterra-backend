@@ -33,7 +33,7 @@ async def get_embeddings(
     creds = await _get_provider_credentials(redis, user_id=user_id, provider=prov, reveal_secret=True)
 
     if prov == "openai":
-        api_key = creds.get("api_key") or getattr(settings, "OPENAI_API_KEY", None)
+        api_key = creds.get("api_key")
         base_url = creds.get("base_url") or None
         organization = creds.get("organization") or None
         # default model
@@ -45,9 +45,9 @@ async def get_embeddings(
             organization=organization,
         )
     elif prov == "azure":
-        api_key = creds.get("api_key") or getattr(settings, "OPENAI_API_KEY", None)
-        azure_endpoint = creds.get("azure_endpoint") or getattr(settings, "AZURE_OPENAI_ENDPOINT", None)
-        api_version = creds.get("api_version") or getattr(settings, "OPENAI_API_VERSION", None)
+        api_key = creds.get("api_key")
+        azure_endpoint = creds.get("azure_endpoint")
+        api_version = creds.get("api_version")
         if not azure_endpoint:
             # try derive from base_url
             bu = creds.get("base_url")
