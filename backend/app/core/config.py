@@ -134,8 +134,6 @@ class Settings(BaseSettings):
     MILVUS_DB: str | None = None
     MILVUS_TLS: bool = False
 
-    WHEATER_URL: AnyHttpUrl
-
     SECRET_KEY: str = secrets.token_urlsafe(32)
     ENCRYPT_KEY: str = secrets.token_urlsafe(32)
     # 默认不放开 CORS，需在环境变量中显式配置（例如："http://localhost:3000,http://127.0.0.1:3000"）
