@@ -5,7 +5,9 @@ from typing import Any, List, Optional, Dict
 
 from app.api.deps import get_db
 from app.crud.agent_crud import crud_agent
-from app.core.agent.plan_act_agent import PlanActAgent
+from app.core.agent.base import AgentContext
+from app.core.agent.registry import AgentRegistry
+from app.core.agent.types import plan_act as _plan_act_module  # noqa: F401 触发注册
 
 router = APIRouter()
 
@@ -42,30 +44,30 @@ async def run_plan_act(agent_id: str, payload: PlanActRunRequest, db: AsyncSessi
     if not agent_obj:
         raise HTTPException(status_code=404, detail="智能体不存在")
 
-    # 执行 Episode
-    plan_agent = PlanActAgent(agent_obj=agent_obj, user_id=payload.user_id)
-
-    final_answer = await plan_agent.run(
-        task=payload.task,
+    # 基于通用框架：Registry 创建 planact 实现，并直接调用 run
+    agent_impl = AgentRegistry.create(agent_obj, db, kind="planact")
+    ctx = AgentContext(
+        user_id=payload.user_id,
+        db=db,
         extra_context={
             "runtime_params": payload.runtime_params or payload.form_params or {},
             "user_id": payload.user_id,
-        }
+            "task": payload.task,
+        },
     )
+    final_answer = await agent_impl.run(task=payload.task, context=ctx)
 
-    # 组装响应
-    mem = plan_agent.memory
-    model_info = {
-        "model_id": getattr(plan_agent.llm_client.ctx, "model_name", None),
-        "provider": getattr(plan_agent.llm_client.ctx, "provider_label", None),
-    }
+    # 组装响应（从实现获取模型信息与记忆轨迹）
+    mem = getattr(agent_impl, "memory", None)
+    model_info = getattr(agent_impl, "get_model_info", None)
+    model_info = model_info() if callable(model_info) else {}
     resp = PlanActRunResponse(
         ok=True,
         final_answer=final_answer,
-        verified=bool(mem.verified),
-        plan=mem.plan,
-        step_results=[sr.model_dump(exclude_none=True) for sr in mem.step_results],
+        verified=bool(getattr(mem, "verified", False)),
+        plan=getattr(mem, "plan", []),
+        step_results=[sr.model_dump(exclude_none=True) for sr in getattr(mem, "step_results", [])],
         model_info=model_info,
-        memory_json=mem.to_json() if (payload.return_memory is True) else None,
+        memory_json=(mem.to_json() if (payload.return_memory is True and hasattr(mem, "to_json")) else None),
     )
     return resp

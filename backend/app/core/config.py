@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     API_VERSION: str = "v1"
     API_V1_STR: str = f"/api/{API_VERSION}"
     PROJECT_NAME: str
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 1  # 1 hour
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 8  # 1 hour
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 100  # 100 days
     DATABASE_USER: str
     DATABASE_PASSWORD: str
@@ -36,8 +36,7 @@ class Settings(BaseSettings):
 
     # Tool integration configuration
     TOOL_PACKAGES: list[str] | None = [
-        "app.core.tool.tools",
-        "app.core.tool.exec",
+        "app.core.tool.tools"
     ]
     # 控制启动时是否自动扫描工具并同步写库（默认关闭，改为手动入库+按需加载）
     TOOL_AUTO_SCAN_ON_START: bool = False
@@ -45,6 +44,14 @@ class Settings(BaseSettings):
     TOOL_WATCHER_ENABLE: bool = False
     # Cross-platform work directory for agent backends
     WORK_DIR: str = str(Path(__file__).parent.parent.parent / "work")
+
+    # Local auth bypass (for development convenience only)
+    # When enabled in development mode, endpoints using get_current_user will bypass
+    # token verification and use/auto-create a local debug user.
+    AUTH_LOCAL_MODE: bool = False
+    AUTH_LOCAL_USERNAME: str | None = "local"
+    AUTH_LOCAL_EMAIL: str | None = "local@example.com"
+    AUTH_LOCAL_IS_SUPERUSER: bool = True
 
     @field_validator("ASYNC_DATABASE_URI", mode="after")
     def assemble_db_connection(cls, v: str | None, info: FieldValidationInfo) -> Any:

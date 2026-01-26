@@ -1,8 +1,7 @@
 from typing import Optional, Any
-from redis.asyncio import Redis  # 仅保留类型兼容，实际不再使用 Redis
+from redis.asyncio import Redis  # 兼容旧签名，实际不使用 Redis
 
 from app.core.config import settings
-from app.utils.crypto import encrypt_text, decrypt_text
 from app.db.session import SessionLocal
 from app.crud.provider_credentials_crud import crud_provider_credentials
 
@@ -12,8 +11,8 @@ CRED_HASH_KEY = "user:{user_id}:provider:{provider}:cred"
 
 
 def get_redis_client() -> Redis:
-    """兼容旧接口的工厂函数（调用方仍可获取 Redis 客户端）。
-    实际存储已迁移到 PostgreSQL，此函数返回值不会被使用。
+    """兼容旧接口的工厂函数。
+    说明：凭据已改为直接存数据库，Redis 客户端不再使用，仅保留以避免上层改动。
     """
     return Redis(host=settings.REDIS_HOST, port=int(settings.REDIS_PORT), decode_responses=True)
 
@@ -29,13 +28,14 @@ async def store_provider_credentials(
     api_version: Optional[str] = None,
     azure_deployment: Optional[str] = None,
 ) -> None:
-    """将 Provider 凭据落库到 PostgreSQL。
-    - 敏感字段 api_key 使用 encrypt_text 加密后存储到 api_key_enc
-    - 其余字段原样存储
+    """将 Provider 凭据直接以明文存入 PostgreSQL。
+    注意：为简化使用，已移除加密/解密流程，api_key 直接存放在 provider_credentials.api_key_enc 字段中。
+    如需后续迁移为新的列名，可再添加 Alembic 迁移。
     """
     values: dict[str, Any] = {}
-    if api_key:
-        values["api_key_enc"] = encrypt_text(api_key)
+    if api_key is not None:
+        # 直接明文存储（复用现有列名，避免立刻做迁移）
+        values["api_key_enc"] = api_key
     if base_url is not None:
         values["base_url"] = base_url
     if organization is not None:
@@ -54,17 +54,16 @@ async def store_provider_credentials(
             provider=provider,
             values=values,
         )
-
-
 async def get_provider_credentials(
     redis: Redis,  # 兼容占位，实际不使用
     user_id: str,
     provider: str,
     reveal_secret: bool = False,
 ) -> dict[str, Optional[str]]:
-    """从 PostgreSQL 获取 Provider 凭据。
-    - 默认不返回明文 api_key，仅返回 has_api_key 标志
-    - 当 reveal_secret=True 时，解密 api_key_enc 返回明文 api_key
+    """从 PostgreSQL 获取 Provider 凭据（明文存储）。
+    - 默认不返回 api_key，仅返回 has_api_key 标志
+    - 当 reveal_secret=True 时，直接返回明文 api_key
+    - 兼容旧数据：如果库里存的是历史加密值，会尝试解密，成功后自动写回明文
     """
     async with SessionLocal() as session:
         rec = await crud_provider_credentials.get_by_user_provider(
@@ -87,14 +86,34 @@ async def get_provider_credentials(
     if rec.api_key_enc:
         result["has_api_key"] = True
         if reveal_secret:
+            api_key_value = rec.api_key_enc
+            # 尝试兼容旧的加密密文（Fernet）。若能解密，则返回解密后的明文并写回数据库以去除加密。
             try:
-                result["api_key"] = decrypt_text(rec.api_key_enc)
+                # 延迟导入，避免硬性依赖
+                from app.utils.crypto import decrypt_text  # type: ignore
+                decrypted = None
+                try:
+                    # 一些 Fernet 密文以 'gAAAA' 开头，但不强依赖前缀判断，直接尝试解密
+                    decrypted = decrypt_text(api_key_value)
+                except Exception:
+                    decrypted = None
+                if decrypted:
+                    api_key_value = decrypted
+                    # 将明文回写，彻底移除加密依赖
+                    await crud_provider_credentials.upsert(
+                        db_session=session,
+                        user_id=user_id,
+                        provider=provider,
+                        values={"api_key_enc": decrypted},
+                    )
+                # else: 解密失败，视为已是明文
             except Exception:
-                result["api_key"] = None
+                # crypto 不可用或其他异常，直接按明文返回
+                pass
+            result["api_key"] = api_key_value
     else:
         result["has_api_key"] = False
 
-    # 不打印敏感信息，避免日志泄露
     return result  # type: ignore[return-value]
 
 

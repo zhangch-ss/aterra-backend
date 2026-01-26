@@ -21,6 +21,7 @@ async def simple_list_models(
     db: AsyncSession = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
+    print("Current user in simple_list_models:", current_user)
     items = await model_service.list_models(
         user_id=current_user.id,
         db_session=db,

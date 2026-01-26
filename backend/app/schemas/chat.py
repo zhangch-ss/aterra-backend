@@ -19,6 +19,8 @@ class MessageCreate(MessageBase):
 
 class SummarizeRequest(BaseModel):
     query: str
+    agent_id: str
+    session_id: str
 
 
 class MessageUpdate(BaseModel):
@@ -36,12 +38,8 @@ class MessageOut(MessageBase):
 
 
 # ============ Session ============
-class SessionBase(BaseModel):
-    user_id: str
-
-
-class SessionCreate(SessionBase):
-    pass
+class SessionCreate(BaseModel):
+    title: Optional[str] = None
 
 
 class SessionUpdate(BaseModel):

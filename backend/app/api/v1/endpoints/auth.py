@@ -162,11 +162,17 @@ async def read_users_me(token: str = Depends(reusable_oauth2), db: AsyncSession 
 
 @router.post("/logout", status_code=status.HTTP_200_OK)
 async def logout(
-    token: str = Depends(reusable_oauth2),
+    token: str | None = Depends(reusable_oauth2),
     current_user = Depends(get_current_user),
     payload: LogoutRequest | None = None,
 ):
     """Revoke current access token; optionally revoke its paired refresh token for current device."""
+    # In local dev bypass mode, token may be absent; perform no-op
+    from app.core.config import ModeEnum
+    if not token:
+        if getattr(settings, "AUTH_LOCAL_MODE", False) and settings.MODE == ModeEnum.development:
+            return {"detail": "Local mode: no token to revoke"}
+        raise HTTPException(status_code=401, detail="Not authenticated")
     redis = get_redis_client()
     # Revoke current access token until it naturally expires
     await revoke_token(redis, current_user.id, token, expire_minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)

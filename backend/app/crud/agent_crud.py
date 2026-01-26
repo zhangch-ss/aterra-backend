@@ -59,8 +59,10 @@ class CRUDAgent(CRUDBase[Agent, AgentCreate, AgentUpdate], CRUDUserFilterMixin):
         await db_session.refresh(agent)
         return agent
 
-    async def create_with_relations(self, *, payload: AgentCreate, db_session: AsyncSession) -> Agent:
-        """创建 Agent 并根据 payload.tool_ids/knowledge_ids 维护关系与配置。"""
+    async def create_with_relations(self, *, payload: AgentCreate, user_id: str, db_session: AsyncSession) -> Agent:
+        """创建 Agent 并根据 payload.tool_ids/knowledge_ids 维护关系与配置。
+        强制设置所属用户 user_id，避免未绑定用户的越权创建。
+        """
         # 先按基础字段创建（过滤关系字段，并映射 desc→description）
         base_data = payload.model_dump(exclude={"tool_ids", "knowledge_ids"}, exclude_unset=True)
         if "desc" in base_data:
@@ -71,6 +73,8 @@ class CRUDAgent(CRUDBase[Agent, AgentCreate, AgentUpdate], CRUDUserFilterMixin):
             base_data = {k: v for k, v in base_data.items() if k in allowed_columns}
         except Exception:
             pass
+        # 绑定创建者
+        base_data["user_id"] = user_id
         agent = Agent.model_validate(base_data)
         db_session.add(agent)
         await db_session.commit()

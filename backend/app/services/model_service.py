@@ -249,7 +249,6 @@ class ModelService:
                 return client.chat.completions.create(
                     model=deployment_name,
                     messages=[{"role": "user", "content": "ping"}],
-                    temperature=temperature,
                     max_completion_tokens=max_completion_tokens
                 )
             await run_in_threadpool(_call)
