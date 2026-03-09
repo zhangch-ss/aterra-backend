@@ -7,7 +7,7 @@ from app.schemas.agent import AgentCreate, AgentUpdate, AgentOut, AgentRead
 
 router = APIRouter()
 
-@router.get("/list_agents", response_model=list[AgentRead])
+@router.get("", response_model=list[AgentRead])
 async def list_agents(
     type: str | None = None,
     scene: str | None = None,
@@ -34,7 +34,7 @@ async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db), current_u
         raise HTTPException(status_code=403, detail="无权限访问该智能体")
     return AgentOut.model_validate(agent, from_attributes=True)
 
-@router.post("/create", response_model=AgentRead)
+@router.post("", response_model=AgentRead)
 async def create_agent(payload: AgentCreate, db: AsyncSession = Depends(get_db), current_user = Depends(get_current_user)):
     # 使用扩展方法：创建后维护 tool_ids 与 knowledge_ids
     # 由服务端绑定当前用户为创建者，payload 中不再需要 user_id

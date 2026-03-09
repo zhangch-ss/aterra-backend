@@ -75,6 +75,10 @@ services:
         "
     env_file: "../.env"
     environment:
+      - DATABASE_HOST=database
+      - DATABASE_PORT=5432
+      - REDIS_HOST=redis_server
+      - REDIS_PORT=6379
       - MILVUS_HOST=host.docker.internal
       - MILVUS_PORT=19530
       - MINIO_INTERNAL_URL=minio:9000

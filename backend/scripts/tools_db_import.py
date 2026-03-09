@@ -27,12 +27,11 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-# 为避免 Settings 在构造 ASYNC_DATABASE_URI 时读取缺失的 DATABASE_* 环境变量，
-# 预置占位的连接字符串以跳过拼装逻辑（dry-run 时不访问数据库）。
+"""
+为避免 Settings 在构造 ASYNC_DATABASE_URI 时读取缺失的 DATABASE_* 环境变量，
+dry-run 模式下可使用占位字符串跳过真实连接；实际写库时请显式传入 --db-url。
+"""
 os.environ.setdefault("ASYNC_DATABASE_URI", "postgresql+asyncpg://user:pass@localhost:5432/placeholder_db")
-os.environ.setdefault("SYNC_CELERY_DATABASE_URI", "postgresql+asyncpg://user:pass@localhost:5432/placeholder_db")
-os.environ.setdefault("SYNC_CELERY_BEAT_DATABASE_URI", "postgresql+psycopg2://user:pass@localhost:5432/placeholder_db")
-os.environ.setdefault("ASYNC_CELERY_BEAT_DATABASE_URI", "postgresql+asyncpg://user:pass@localhost:5432/placeholder_db")
 
 from app.core.tool.tool_loader import ToolLoader
 from typing import Optional

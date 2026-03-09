@@ -1,6 +1,7 @@
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_, update
+from sqlmodel import select
+from sqlalchemy import or_, and_, update
 from fastapi import HTTPException
 from app.models.text_splitter import TextSplitter
 from app.schemas.text_splitter import TextSplitterCreateInput, TextSplitterUpdate

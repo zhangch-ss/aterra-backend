@@ -1,6 +1,7 @@
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_
+from sqlmodel import select
+from sqlalchemy import or_, and_
 from app.models.model import Model
 from app.schemas.model import ModelCreateInput, ModelUpdate
 from app.crud.base_crud import CRUDBase

@@ -3,7 +3,6 @@ from typing import Optional
 from langchain_openai import OpenAIEmbeddings, AzureOpenAIEmbeddings
 from app.core.config import settings
 from app.utils.credentials_store import (
-    get_redis_client,
     get_provider_credentials as _get_provider_credentials,
 )
 
@@ -25,12 +24,11 @@ async def get_embeddings(
     model: Optional[str] = None,
 ):
     """Factory to create LangChain Embeddings for OpenAI or Azure OpenAI.
-    - Reads per-user provider credentials from Redis (credentials_store)
+    - Reads per-user provider credentials from DB (credentials_store)
     - Falls back to global settings if user credentials missing
     """
     prov = _normalize_provider(provider)
-    redis = get_redis_client()
-    creds = await _get_provider_credentials(redis, user_id=user_id, provider=prov, reveal_secret=True)
+    creds = await _get_provider_credentials(user_id=user_id, provider=prov, reveal_secret=True)
 
     if prov == "openai":
         api_key = creds.get("api_key")

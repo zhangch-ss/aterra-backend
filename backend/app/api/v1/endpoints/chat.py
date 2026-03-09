@@ -18,9 +18,6 @@ from app.crud.agent_crud import crud_agent
 from app.crud.prompt_crud import crud_prompt
 from app.core.prompts.prompts import SUMMARIZE_TITLE
 from uuid import UUID
-from openai import AzureOpenAI
-from app.core.config import settings
-import os
 from app.utils.cache import AgentCache
 from app.core.model.llm_factory import build_raw_client
 from app.core.agent.registry import AgentRegistry
@@ -29,6 +26,8 @@ from app.core.agent.runner import AgentOrchestrator
 from app.core.agent.types import deep_agent as _deep_agent_module  # noqa: F401
 from app.core.agent.types import plan_act as _plan_act_module  # noqa: F401
 router = APIRouter()
+from app.utils.logger import setup_logger
+logger = setup_logger(__name__)
 
 
 @router.get("/sessions", response_model=SessionsListResponse)
@@ -160,7 +159,7 @@ async def stream_agent_chat(request: ChatCompletions, db: AsyncSession = Depends
     if not session_id:
         raise HTTPException(status_code=400, detail="缺少 session_id")
 
-    print(f"💬 用户输入: {user_input}")
+    logger.info("用户输入: %s", user_input)
 
     # === 优化：尝试从缓存获取 Agent ===
     # 注意：由于 SQLModel 对象复杂，我们使用缓存来快速判断 Agent 是否存在
@@ -270,11 +269,11 @@ async def summarize_session_title(req: SummarizeRequest, db: AsyncSession = Depe
         if not title:
             title = "未命名会话"
 
-        print(f"✅ [{req_session_id}] 自动生成标题: {title}")
+        logger.info("[%s] 自动生成标题: %s", req_session_id, title)
         return {"title": title}
 
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ 生成标题出错: {e}")
+        logger.exception("生成标题出错: %s", e)
         raise HTTPException(status_code=500, detail=f"生成标题失败: {e}")

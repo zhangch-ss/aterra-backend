@@ -1,6 +1,7 @@
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, UniqueConstraint
+from sqlmodel import select
+from sqlalchemy import and_
 from app.models.provider_credentials import ProviderCredentials
 
 

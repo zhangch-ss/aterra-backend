@@ -40,7 +40,7 @@ async def _fetch_gee_auth_from_tool_runtime_params(
     return GEEAuthParams(**values)
 
 
-async def ensure_gee_initialized(runtime: ToolRuntime[RuntimeContext], tool_name: str | None = None) -> Optional[dict]:
+async def gee_initialized(runtime: ToolRuntime[RuntimeContext], tool_name: str | None = None) -> Optional[dict]:
     ctx = runtime.context
     db: AsyncSession = ctx.db
     user_id: str = ctx.user_id
@@ -135,7 +135,7 @@ async def gee_get_satellite_imagery(
         dict: Download results or {"error": str} if failed.
     """
 
-    init_err = await ensure_gee_initialized(runtime, tool_name="gee_get_satellite_imagery")
+    init_err = await gee_initialized(runtime, tool_name="gee_get_satellite_imagery")
     if init_err:
         return init_err
 
@@ -242,7 +242,7 @@ async def gee_get_dem(
         dict: DEM file path or {"error": str} if failed.
     """
 
-    init_err = await ensure_gee_initialized(runtime, tool_name="gee_get_dem")
+    init_err = await gee_initialized(runtime, tool_name="gee_get_dem")
     if init_err:
         return init_err
 
@@ -327,7 +327,7 @@ async def gee_get_climate(
         dict: Export result or {"error": str} if failed.
     """
 
-    init_err = await ensure_gee_initialized(runtime, tool_name="gee_get_climate")
+    init_err = await gee_initialized(runtime, tool_name="gee_get_climate")
     if init_err:
         return init_err
 

@@ -6,7 +6,7 @@ import threading
 import time
 import logging
 from functools import lru_cache
-from typing import Dict, Callable, List, Union, Optional, Tuple
+from typing import Dict, List, Union, Optional, Tuple
 
 from langchain_core.tools import BaseTool, StructuredTool
 
@@ -129,6 +129,11 @@ class ToolLoader:
         return tool_map.get(tool_name)
 
     @classmethod
+    def load_tool_by_name(cls, tool_name: str) -> Optional[BaseTool]:
+        """公开方法：按工具名称加载对象（包装私有实现）。"""
+        return cls._load_tool_by_name(tool_name)
+
+    @classmethod
     def _load_tool_by_module_func(cls, module: Optional[str], function: Optional[str]) -> Optional[BaseTool]:
         """优先按 module+function 精确导入工具，增加轻量缓存：
         - 若对象是 BaseTool/StructuredTool，加入缓存并返回
@@ -137,19 +142,22 @@ class ToolLoader:
         if not module or not function:
             return None
         key = (module, function)
-        # 命中缓存直接返回
-        cached = cls._mf_cache.get(key)
+        # 命中缓存直接返回（加锁以避免并发读写竞态）
+        with cls._lock:
+            cached = cls._mf_cache.get(key)
         if cached:
             return cached
         try:
             mod = importlib.import_module(module)
             obj = getattr(mod, function)
             if isinstance(obj, BaseTool):
-                cls._mf_cache[key] = obj
+                with cls._lock:
+                    cls._mf_cache[key] = obj
                 return obj
             # 如果是 StructuredTool（兼容旧版）
             if isinstance(obj, StructuredTool):
-                cls._mf_cache[key] = obj  # StructuredTool 也实现 BaseTool 接口
+                with cls._lock:
+                    cls._mf_cache[key] = obj  # StructuredTool 也实现 BaseTool 接口
                 return obj
             # 其它类型暂不自动适配
             logger.warning(f"对象不是 BaseTool/StructuredTool: {module}.{function}")
@@ -233,3 +241,19 @@ class ToolLoader:
                 "description": desc,
             })
         return data
+
+    @classmethod
+    def get_scan_stats(cls) -> dict:
+        """返回扫描观测信息：
+        - loaded_count: 已加载工具数量
+        - errors: 最近一次扫描的错误列表
+        - last_scan_ts: 最近扫描时间戳（float 秒）
+        - origins: 名称 -> (module, function)
+        """
+        tool_map = cls._scan_all_tools()
+        return {
+            "loaded_count": len(tool_map),
+            "errors": list(cls._load_errors),
+            "last_scan_ts": cls._last_scan_ts,
+            "origins": {k: v for k, v in cls._origins.items()},
+        }

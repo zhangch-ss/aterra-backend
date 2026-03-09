@@ -3,7 +3,6 @@ from typing import Any, Generic, TypeVar
 from uuid import UUID
 from app.schemas.common import IOrderEnum
 from fastapi_pagination.ext.sqlalchemy import paginate
-from fastapi_async_sqlalchemy import db
 from fastapi_pagination import Params, Page
 from pydantic import BaseModel
 from sqlmodel import SQLModel, select, func
@@ -11,6 +10,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel.sql.expression import Select
 from sqlalchemy import exc
 from sqlalchemy.orm import selectinload
+from app.utils.logger import setup_logger
 
 
 
@@ -19,6 +19,9 @@ CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)
 UpdateSchemaType = TypeVar("UpdateSchemaType", bound=BaseModel)
 SchemaType = TypeVar("SchemaType", bound=BaseModel)
 T = TypeVar("T", bound=SQLModel)
+
+
+logger = setup_logger("CRUDBase")
 
 
 class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
@@ -30,15 +33,19 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         * `schema`: A Pydantic model (schema) class
         """
         self.model = model
-        self.db = db
 
-    def get_db(self) -> type(db):
-        return self.db
+    @staticmethod
+    def _ensure_session(db_session: AsyncSession | None) -> AsyncSession:
+        if db_session is None:
+            raise RuntimeError(
+                "AsyncSession is required. Ensure you inject it via Depends(get_db) and pass db_session explicitly."
+            )
+        return db_session
 
     async def get(
         self, *, id: UUID | str, db_session: AsyncSession | None = None
     ) -> ModelType | None:
-        db_session = db_session or self.db.session
+        db_session = self._ensure_session(db_session)
         query = select(self.model).where(self.model.id == id)
         response = await db_session.execute(query)
         return response.scalar_one_or_none()
@@ -48,8 +55,8 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         *,
         list_ids: list[UUID | str],
         db_session: AsyncSession | None = None,
-    ) -> list[ModelType] | None:
-        db_session = db_session or self.db.session
+    ) -> list[ModelType]:
+        db_session = self._ensure_session(db_session)
         response = await db_session.execute(
             select(self.model).where(self.model.id.in_(list_ids))
         )
@@ -57,8 +64,8 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
 
     async def get_count(
         self, db_session: AsyncSession | None = None
-    ) -> ModelType | None:
-        db_session = db_session or self.db.session
+    ) -> int:
+        db_session = self._ensure_session(db_session)
         response = await db_session.execute(
             select(func.count()).select_from(select(self.model).subquery())
         )
@@ -72,7 +79,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         query: T | Select[T] | None = None,
         db_session: AsyncSession | None = None,
     ) -> list[ModelType]:
-        db_session = db_session or self.db.session
+        db_session = self._ensure_session(db_session)
         if query is None:
             query = select(self.model).offset(skip).limit(limit).order_by(self.model.id)
         response = await db_session.execute(query)
@@ -85,7 +92,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         query: T | Select[T] | None = None,
         db_session: AsyncSession | None = None,
     ) -> Page[ModelType]:
-        db_session = db_session or self.db.session
+        db_session = self._ensure_session(db_session)
         if query is None:
             query = select(self.model)
 
@@ -101,7 +108,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         query: T | Select[T] | None = None,
         db_session: AsyncSession | None = None,
     ) -> Page[ModelType]:
-        db_session = db_session or self.db.session
+        db_session = self._ensure_session(db_session)
 
         columns = self.model.__table__.columns
 
@@ -125,7 +132,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         order: IOrderEnum | None = IOrderEnum.ascendent,
         db_session: AsyncSession | None = None,
     ) -> list[ModelType]:
-        db_session = db_session or self.db.session
+        db_session = self._ensure_session(db_session)
 
         columns = self.model.__table__.columns
 
@@ -157,7 +164,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         created_by_id: UUID | str | None = None,
         db_session: AsyncSession | None = None,
     ) -> ModelType:
-        db_session = db_session or self.db.session
+        db_session = self._ensure_session(db_session)
         db_obj = self.model.model_validate(obj_in)  # type: ignore
 
         if created_by_id:
@@ -170,21 +177,15 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             return db_obj
 
         except exc.IntegrityError as e:
-            print("❌ IntegrityError:", repr(e))
+            logger.warning("IntegrityError on create: %r", e)
             await db_session.rollback()
             raise HTTPException(status_code=409, detail="Resource already exists")
 
         except Exception as e:
-            # 🔥 打印真实错误
-            print("❌ CREATE ERROR:", repr(e))
-            
             # 必须 rollback
             await db_session.rollback()
-
-            raise HTTPException(
-                status_code=500,
-                detail=f"Database error: {repr(e)}",
-            )
+            logger.exception("CREATE ERROR: %r", e)
+            raise HTTPException(status_code=500, detail=f"Database error: {repr(e)}")
 
 
     async def update(
@@ -194,7 +195,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         obj_new: UpdateSchemaType | dict[str, Any] | ModelType,
         db_session: AsyncSession | None = None,
     ) -> ModelType:
-        db_session = db_session or self.db.session
+        db_session = self._ensure_session(db_session)
 
         if isinstance(obj_new, dict):
             update_data = obj_new
@@ -223,7 +224,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
     async def remove(
         self, *, id: UUID | str, db_session: AsyncSession | None = None
     ) -> ModelType:
-        db_session = db_session or self.db.session
+        db_session = self._ensure_session(db_session)
         response = await db_session.execute(
             select(self.model).where(self.model.id == id)
         )
@@ -244,7 +245,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         根据主键获取对象并可选预加载关联关系（selectinload）
         例如: await crud_agent.get_with_relations(id=agent_id, relations=["tools", "subagents"])
         """
-        db_session = db_session or self.db.session
+        db_session = self._ensure_session(db_session)
 
         query = select(self.model)
         if relations:

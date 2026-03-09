@@ -6,7 +6,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
-from app.db.session import SessionLocal, SessionLocalCelery
+from app.db.session import SessionLocal
 from app.crud.user_crud import crud_user
 from app.core.security import decode_token
 from app.utils.token_store import get_redis_client, is_token_revoked
@@ -23,9 +23,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-async def get_jobs_db() -> AsyncGenerator[AsyncSession, None]:
-    async with SessionLocalCelery() as session:
-        yield session
+# Legacy jobs DB (Celery) dependency removed — unified on single SessionLocal
 
 
 async def get_current_user(

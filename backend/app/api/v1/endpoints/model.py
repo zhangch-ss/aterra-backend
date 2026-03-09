@@ -14,14 +14,13 @@ router = APIRouter()
 
 
 
-@router.get("/list", response_model=list[ModelRead])
-async def simple_list_models(
+@router.get("", response_model=list[ModelRead])
+async def list_models(
     provider: str | None = None,
     keyword: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    print("Current user in simple_list_models:", current_user)
     items = await model_service.list_models(
         user_id=current_user.id,
         db_session=db,
@@ -39,7 +38,7 @@ async def get_model(model_id: str, db: AsyncSession = Depends(get_db), current_u
     return ModelRead.model_validate(model, from_attributes=True)
 
 
-@router.post("/create", response_model=ModelRead)
+@router.post("", response_model=ModelRead)
 async def create_model(payload: ModelCreateInput, db: AsyncSession = Depends(get_db), current_user = Depends(get_current_user)):
     created = await model_service.create_model(payload=payload, user_id=current_user.id, db_session=db)
     return ModelRead.model_validate(created, from_attributes=True)
@@ -82,7 +81,7 @@ async def verify_model(
     return result
 
 
-# ===== Provider credentials management (stored encrypted in Redis) =====
+# ===== Provider credentials management (stored in PostgreSQL, optionally encrypted at rest) =====
 @router.post("/credentials/{provider}", response_model=dict)
 async def set_provider_credentials(
     provider: str,

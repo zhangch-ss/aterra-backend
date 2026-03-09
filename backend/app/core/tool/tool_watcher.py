@@ -4,8 +4,14 @@ import threading
 import time
 from typing import Optional
 
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+# Make watchdog optional: degrade gracefully if not installed
+try:
+    from watchdog.observers import Observer  # type: ignore
+    from watchdog.events import FileSystemEventHandler  # type: ignore
+except Exception:  # pragma: no cover - optional dependency path
+    Observer = None  # type: ignore
+    class FileSystemEventHandler:  # minimal fallback to allow import
+        pass
 
 from app.core.tool.tool_loader import ToolLoader
 from app.core.tool.tool_registry import sync_scanned_tools_threadsafe
@@ -66,7 +72,7 @@ class ToolDirEventHandler(FileSystemEventHandler):
         self._on_change("🗑", event.src_path)
 
 
-_observer: Optional[Observer] = None
+_observer: Optional["Observer"] = None
 _debounce: Optional[_Debounce] = None
 
 
@@ -92,6 +98,9 @@ def _rescan_tools():
 def start_tool_watcher():
     """后台启动目录监控（防抖 + 可停止）。"""
     global _observer, _debounce
+    if Observer is None:
+        logger.warning("watchdog 未安装，跳过工具目录监控。可安装 'watchdog' 并启用 settings.TOOL_WATCHER_ENABLE 后使用。")
+        return
     if _observer is not None:
         logger.info("工具监控已运行，忽略重复启动。")
         return

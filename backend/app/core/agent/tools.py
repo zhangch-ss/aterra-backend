@@ -9,6 +9,7 @@ from langchain_core.tools.base import InjectedToolArg as _InjectedToolArg
 from pydantic import BaseModel as _PydanticBaseModel
 
 from app.core.tool.tool_loader import ToolLoader
+from app.core.tool.schema_extractor import extract_tool_schema
 
 
 class ToolManager:
@@ -35,7 +36,7 @@ class ToolManager:
             try:
                 loaded_names = ToolLoader.get_loaded_tools()
                 for name in loaded_names:
-                    obj = ToolLoader._load_tool_by_name(name)
+                    obj = ToolLoader.load_tool_by_name(name)
                     if obj:
                         tools.append(obj)
             except Exception:
@@ -47,7 +48,7 @@ class ToolManager:
     def get_secure_fields(t: BaseTool) -> set[str]:
         secure_fields: set[str] = set()
         try:
-            schema = t.args_schema.schema() if hasattr(t, "args_schema") and t.args_schema else {}
+            schema, _ = extract_tool_schema(t)
             props = schema.get("properties", {})
             for fname, fdef in props.items():
                 extra = fdef.get("json_schema_extra") or {}
@@ -125,16 +126,15 @@ class ToolManager:
     def describe_tools(tools: List[BaseTool]) -> str:
         desc_list = []
         for t in tools:
-            schema = {}
-            if hasattr(t, "args_schema") and t.args_schema:
-                try:
-                    schema = t.args_schema.schema().get("properties", {})
-                except Exception:
-                    schema = {}
+            schema, _ = extract_tool_schema(t)
+            try:
+                props = schema.get("properties", {})
+            except Exception:
+                props = {}
             desc_list.append(
                 f"- 工具名: {t.name}\n"
                 f"  描述: {t.description or '无描述'}\n"
-                f"  参数: {json.dumps(schema, ensure_ascii=False)}"
+                f"  参数: {json.dumps(props, ensure_ascii=False)}"
             )
         return "\n".join(desc_list) if desc_list else "（无工具可用）"
 

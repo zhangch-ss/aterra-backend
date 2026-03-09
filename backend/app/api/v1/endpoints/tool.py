@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import delete, update as sa_update
+from sqlalchemy import delete
 from app.api.deps import get_db
 from app.crud.tool_crud import crud_tool
 from app.schemas.tool import ToolTypeOut, ToolCreate, CreateToolCardOut, ToolDetailOut
 from app.core.tool.tool_loader import ToolLoader
 from app.models.link import AgentToolLink
-from app.models.tool import Tool
+from app.core.tool.schema_extractor import extract_tool_schema
 
 router = APIRouter()
 
@@ -25,18 +25,18 @@ async def get_loaded_tools():
 async def get_tool_errors():
     return ToolLoader.get_load_errors()
 
+# ✅ 工具系统健康统计（扫描数量、错误与时间戳）
+@router.get("/_health")
+async def tools_health():
+    return ToolLoader.get_scan_stats()
+
 # ✅ 获取工具参数 Schema（包含 source/secure 元数据）
 @router.get("/schema/name/{tool_name}")
 async def get_tool_schema(tool_name: str):
-    obj = ToolLoader._load_tool_by_name(tool_name)
+    obj = ToolLoader.load_tool_by_name(tool_name)
     if not obj:
         raise HTTPException(status_code=404, detail="工具未找到")
-    schema = {}
-    if hasattr(obj, "args_schema") and getattr(obj, "args_schema"):
-        try:
-            schema = obj.args_schema.schema()
-        except Exception:
-            schema = {}
+    schema, _ = extract_tool_schema(obj)
     return {
         "name": getattr(obj, "name", tool_name),
         "description": getattr(obj, "description", None),
@@ -77,8 +77,25 @@ async def get_tool(tool_id: str, db: AsyncSession = Depends(get_db)):
     tool = await crud_tool.get(id=tool_id, db_session=db)
     if not tool:
         raise HTTPException(status_code=404, detail="工具不存在")
-
-    # 直接返回原始运行时参数（包含明文），不做遮罩
+    # 在响应中对运行时敏感参数进行遮罩，避免明文外泄
+    rp = getattr(tool, "runtime_parameters", None)
+    if isinstance(rp, dict):
+        schema = rp.get("schema") if isinstance(rp.get("schema"), dict) else None
+        values = rp.get("values") if isinstance(rp.get("values"), dict) else {}
+        secure_keys = _collect_secure_keys(schema, values)
+        masked_values: dict = {}
+        for k, v in values.items():
+            if k in secure_keys and v is not None:
+                masked_values[k] = MASK_SENTINEL
+            else:
+                masked_values[k] = v
+        rp_safe = dict(rp)
+        rp_safe["values"] = masked_values
+        # 不在此处修改数据库，只修改返回对象的字段值
+        try:
+            setattr(tool, "runtime_parameters", rp_safe)
+        except Exception:
+            pass
     return tool
 
 from typing import Any, Optional
@@ -136,7 +153,7 @@ async def update_runtime_config(tool_id: str, payload: RuntimeConfigUpdate, db: 
                 # 清除 Provider 级密钥（仅处理常见 api_key）
                 if payload.provider and _is_secure_key_name(key):
                     try:
-                        await delete_provider_credentials(redis=None, user_id=tool.user_id or "", provider=payload.provider)
+                        await delete_provider_credentials(user_id=tool.user_id or "", provider=payload.provider)
                     except Exception:
                         pass
                 # 标记为未设置
@@ -159,7 +176,6 @@ async def update_runtime_config(tool_id: str, payload: RuntimeConfigUpdate, db: 
             if payload.provider and _is_secure_key_name(k):
                 try:
                     await store_provider_credentials(
-                        redis=None,
                         user_id=tool.user_id or "",
                         provider=payload.provider,
                         api_key=str(v) if v is not None else None,
@@ -186,11 +202,19 @@ async def update_runtime_config(tool_id: str, payload: RuntimeConfigUpdate, db: 
         db_session=db,
     )
 
-    # 返回非敏感值与占位后的密钥显示状态
+    # 返回非敏感值与占位后的密钥显示状态（避免接口回显明文）
+    values_after = rp.get("values", {})
+    masked_values: dict[str, Any] = {}
+    for k, v in (values_after.items() if isinstance(values_after, dict) else []):
+        if k in secure_keys and v is not None:
+            masked_values[k] = MASK_SENTINEL
+        else:
+            masked_values[k] = v
+
     return {
         "ok": True,
         "tool_id": tool_id,
-        "values": rp.get("values", {}),
+        "values": masked_values,
         "secrets": rp.get("secrets", {}),
     }
 

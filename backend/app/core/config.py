@@ -26,12 +26,13 @@ class Settings(BaseSettings):
     DATABASE_HOST: str
     DATABASE_PORT: int
     DATABASE_NAME: str
-    DATABASE_CELERY_NAME: str = "celery_schedule_jobs"
     REDIS_HOST: str
     REDIS_PORT: str
     DB_POOL_SIZE: int = 83
     WEB_CONCURRENCY: int = 9
-    POOL_SIZE: int = max(DB_POOL_SIZE // WEB_CONCURRENCY, 5)
+    # Derive POOL_SIZE from DB_POOL_SIZE and WEB_CONCURRENCY when not explicitly provided.
+    # Using a validator below ensures env overrides are respected.
+    POOL_SIZE: int | None = None
     ASYNC_DATABASE_URI: PostgresDsn | str = ""
 
     # Tool integration configuration
@@ -53,6 +54,11 @@ class Settings(BaseSettings):
     AUTH_LOCAL_EMAIL: str | None = "local@example.com"
     AUTH_LOCAL_IS_SUPERUSER: bool = True
 
+    # Security hardening for provider credentials storage
+    # When False (default), encryption failures will NOT fallback to plaintext storage.
+    # Set to True only in controlled dev environments to allow legacy/plaintext migration.
+    ALLOW_PLAINTEXT_SECRET_FALLBACK: bool = False
+
     @field_validator("ASYNC_DATABASE_URI", mode="after")
     def assemble_db_connection(cls, v: str | None, info: FieldValidationInfo) -> Any:
         if isinstance(v, str):
@@ -67,58 +73,17 @@ class Settings(BaseSettings):
                 )
         return v
 
-    SYNC_CELERY_DATABASE_URI: PostgresDsn | str = ""
-
-    @field_validator("SYNC_CELERY_DATABASE_URI", mode="after")
-    def assemble_celery_db_connection(
-        cls, v: str | None, info: FieldValidationInfo
-    ) -> Any:
-        if isinstance(v, str):
-            if v == "":
-                return PostgresDsn.build(
-                    scheme="postgresql+asyncpg",
-                    username=info.data["DATABASE_USER"],
-                    password=info.data["DATABASE_PASSWORD"],
-                    host=info.data["DATABASE_HOST"],
-                    port=info.data["DATABASE_PORT"],
-                    path=info.data["DATABASE_CELERY_NAME"],
-                )
-        return v
-
-    SYNC_CELERY_BEAT_DATABASE_URI: PostgresDsn | str = ""
-
-    @field_validator("SYNC_CELERY_BEAT_DATABASE_URI", mode="after")
-    def assemble_celery_beat_db_connection(
-        cls, v: str | None, info: FieldValidationInfo
-    ) -> Any:
-        if isinstance(v, str):
-            if v == "":
-                return PostgresDsn.build(
-                    scheme="postgresql+psycopg2",
-                    username=info.data["DATABASE_USER"],
-                    password=info.data["DATABASE_PASSWORD"],
-                    host=info.data["DATABASE_HOST"],
-                    port=info.data["DATABASE_PORT"],
-                    path=info.data["DATABASE_CELERY_NAME"],
-                )
-        return v
-
-    ASYNC_CELERY_BEAT_DATABASE_URI: PostgresDsn | str = ""
-
-    @field_validator("ASYNC_CELERY_BEAT_DATABASE_URI", mode="after")
-    def assemble_async_celery_beat_db_connection(
-        cls, v: str | None, info: FieldValidationInfo
-    ) -> Any:
-        if isinstance(v, str):
-            if v == "":
-                return PostgresDsn.build(
-                    scheme="postgresql+asyncpg",
-                    username=info.data["DATABASE_USER"],
-                    password=info.data["DATABASE_PASSWORD"],
-                    host=info.data["DATABASE_HOST"],
-                    port=info.data["DATABASE_PORT"],
-                    path=info.data["DATABASE_CELERY_NAME"],
-                )
+    # Derive POOL_SIZE after settings are loaded if not provided explicitly
+    @field_validator("POOL_SIZE", mode="after")
+    def derive_pool_size(cls, v: int | None, info: FieldValidationInfo) -> int | None:
+        if v is None:
+            try:
+                db_pool_size = int(info.data.get("DB_POOL_SIZE"))
+                web_conc = int(info.data.get("WEB_CONCURRENCY")) or 1
+                return max(db_pool_size // max(web_conc, 1), 5)
+            except Exception:
+                # If any issue, keep None so engine uses defaults
+                return None
         return v
 
     FIRST_SUPERUSER_EMAIL: EmailStr
@@ -160,6 +125,17 @@ class Settings(BaseSettings):
         ),
         extra="ignore",
     )
+
+    # Enforce SECRET_KEY must be explicitly provided in production
+    @field_validator("SECRET_KEY", mode="after")
+    def validate_secret_key(cls, v: str, info: FieldValidationInfo) -> str:
+        try:
+            mode = info.data.get("MODE")
+        except Exception:
+            mode = None
+        if str(mode) == ModeEnum.production and not os.getenv("SECRET_KEY"):
+            raise ValueError("SECRET_KEY must be provided via environment variable in production")
+        return v
 
 
 settings = Settings()  # type: ignore

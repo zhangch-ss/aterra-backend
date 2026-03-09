@@ -1,6 +1,7 @@
 from typing import List, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, distinct, or_, and_
+from sqlmodel import select
+from sqlalchemy import distinct, or_, and_
 from app.models.agent import Agent
 from app.schemas.agent import AgentCreate, AgentUpdate
 from app.crud.base_crud import CRUDBase

@@ -23,8 +23,8 @@ from app.schemas.knowledge_document import (
 
 router = APIRouter()
 
-# 创建知识库
-@router.post("/create", response_model=KnowledgeRead)
+# 创建知识库（RESTful）
+@router.post("", response_model=KnowledgeRead)
 async def create_knowledge(
     payload: KnowledgeCreate,
     db: AsyncSession = Depends(get_db),
@@ -68,8 +68,8 @@ async def delete_knowledge(
     # 注意：RAG 删除向量未实现持久化 ids，这里暂不清理。后续可扩展为按 knowledge_id 维护集合/ids。
     return {"ok": True}
 
-# 列出当前用户的知识库（支持关键词搜索 + 简单分页）
-@router.get("/list", response_model=List[KnowledgeRead])
+# 列出当前用户的知识库（支持关键词搜索 + 简单分页）（RESTful）
+@router.get("", response_model=List[KnowledgeRead])
 async def list_knowledges(
     keyword: Optional[str] = None,
     page: int = 1,
