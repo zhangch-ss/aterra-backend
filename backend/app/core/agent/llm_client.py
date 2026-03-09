@@ -35,6 +35,23 @@ class LLMClient:
         self.ctx.model_name = ctx.model_name
         return llm, self.ctx
 
+    @classmethod
+    async def from_agent(
+        cls,
+        agent_obj: Any,
+        user_id: str,
+    ) -> tuple["LLMClient", LLMContext]:
+        """基于 Agent 对象统一构建 LLMClient 并初始化，返回 (client, ctx)。
+
+        - 自动读取 agent_obj/invoke_config 与 agent_obj.model.provider
+        - 完成 init() 调用并返回上下文
+        """
+        raw_cfg = getattr(agent_obj, "invoke_config", None) or getattr(getattr(agent_obj, "model", None), "invoke_config", None)
+        prov = getattr(getattr(agent_obj, "model", None), "provider", None)
+        client = cls(user_id=str(user_id), raw_cfg=raw_cfg, provider=prov)
+        await client.init()
+        return client, client.ctx
+
     async def stream_chat(
         self,
         messages: list[BaseMessage],

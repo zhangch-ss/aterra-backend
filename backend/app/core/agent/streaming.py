@@ -9,7 +9,25 @@ from app.core.agent.base import AgentEvent
 
 
 class AgentEmit:
-    """统一的 AgentEvent 构造辅助类，避免各 Agent 重复拼装 payload。"""
+    """统一的 AgentEvent 构造辅助类，避免各 Agent 重复拼装 payload。
+
+    事件载荷规范：
+    - token:
+        {"content": str, "final": bool, "format": "markdown|text|..."}
+    - assistant:
+        {"content": str, "tool_calls": Optional[list[dict]]}
+        其中 tool_calls 的结构遵循 langchain/DeepAgents 的标准：
+          [{"name": str, "args": dict, ...}]。Orchestrator 层会使用 ChatHistoryStore.serialize_tool_calls 持久化。
+    - tool:
+        {"tools": list[dict], "status": "started|finished"}
+        其中 tools 列表项为 {"name": str, "args_masked"?: dict}；
+        args_masked 为可选，用于隐藏敏感字段，仅在 started 事件中出现。
+    - tool_msg:
+        {"content": str, "tool_call_id": str, "tool_name": str,
+         "content_type": "text|json", "json"?: dict, "status": "success|error"}
+    - error:
+        {"content": str, "code": int}
+    """
 
     @staticmethod
     def token(content: str, *, final: bool = False, format: str = "markdown") -> AgentEvent:

@@ -17,7 +17,7 @@ from app.core.agent.tools import ToolManager
 from app.core.config import settings
 from app.core.tool.tools.gee.authz import RuntimeContext
 from app.models.agent import Agent as AgentModel
-
+from app.core.agent.streaming import AgentEmit
 
 class DeepAgentAdapter(BaseAgent):
     """将 deepagents 封装为统一 BaseAgent 接口，产出 AgentEvent。"""
@@ -31,17 +31,16 @@ class DeepAgentAdapter(BaseAgent):
         self._tools = []
 
     async def _init(self) -> None:
-        # LLM
-        raw_cfg = getattr(self.agent_obj, "invoke_config", None) or getattr(self.agent_obj.model, "invoke_config", None)
-        prov = getattr(self.agent_obj.model, "provider", None)
-        llm_client = LLMClient(user_id=str(getattr(self.agent_obj, "user_id", "") or ""), raw_cfg=raw_cfg, provider=prov)
-        llm, ctx = await llm_client.init()
+        # LLM（统一初始化）
+        user_id = str(getattr(self.agent_obj, "user_id", "") or "")
+        llm_client, ctx = await LLMClient.from_agent(self.agent_obj, user_id)
+        llm = llm_client.llm
         self.provider_label = ctx.provider_label
         self.model_name = ctx.model_name
 
         # Tools
         tools_records = getattr(self.agent_obj, "tools", []) or []
-        self._tools = ToolManager.load_from_records(tools_records)
+        self._tools = ToolManager.load_from_records(tools_records, include_defaults=True)
 
         # DeepAgent
         self._deep_agent = create_deep_agent(
@@ -90,19 +89,17 @@ class DeepAgentAdapter(BaseAgent):
                     new_text = content[len(emitted_text):]
                     if new_text:
                         emitted_text += new_text
-                        yield AgentEvent("token", {"content": new_text, "final": False, "format": "markdown"})
+                        yield AgentEmit.token(content=new_text)
 
                 # 工具调用在最后一个 chunk 处理
                 tool_calls = getattr(final_msg, "tool_calls", None)
                 if tool_calls:
                     assistant_tool_calls = tool_calls
-                    yield AgentEvent("assistant", {
-                        "content": final_msg.content or "",
-                        "tool_calls": tool_calls,
-                    })
-                    # 发送工具开始事件
+                    yield AgentEmit.assistant(content=final_msg.content or "", tool_calls=tool_calls)
+
+                    # 发送工具开始事件（标准载荷：[{"name": name}]）
                     tool_names = [tc.get("name", "") for tc in tool_calls]
-                    yield AgentEvent("tool", {"tools": tool_names, "status": "started"})
+                    yield AgentEmit.tool_started([{"name": n} for n in tool_names])
 
             elif isinstance(msg, ToolMessage):
                 tool_call_id = getattr(msg, "tool_call_id", "")
@@ -116,21 +113,22 @@ class DeepAgentAdapter(BaseAgent):
                         content_type = "json"
                     except Exception:
                         content_type = "text"
-                yield AgentEvent("tool_msg", {
-                    "content": tool_content,
-                    "tool_call_id": tool_call_id,
-                    "tool_name": tool_name,
-                    "content_type": content_type,
-                    "json": parsed_json,
-                    "status": "success",
-                })
+                yield AgentEmit.tool_msg(
+                    content=tool_content,
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    content_type=content_type,
+                    json=parsed_json,
+                    status="success",
+                )
+
 
         # 流结束：发出 finished 工具事件（如有）与最终 assistant 文本（若无工具调用）
         if assistant_tool_calls:
             tool_names = [tc.get("name", "") for tc in assistant_tool_calls]
-            yield AgentEvent("tool", {"tools": tool_names, "status": "finished"})
+            yield AgentEmit.tool_finished([{"name": n} for n in tool_names])
         if emitted_text and not assistant_tool_calls:
-            yield AgentEvent("assistant", {"content": emitted_text})
+            yield AgentEmit.assistant(emitted_text)
 
 
 def _register() -> None:

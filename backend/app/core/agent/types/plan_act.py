@@ -9,10 +9,9 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 
-from app.core.agent.base import BaseAgent, AgentContext, AgentEvent
+from app.core.agent.base import BaseAgent, AgentContext
 from app.core.agent.llm_client import LLMClient
 from app.core.agent.tools import ToolManager
-from app.core.tool.tool_loader import ToolLoader
 from app.models.agent import Agent as AgentModel
 from app.core.agent.streaming import AgentEmit, run_tool_with_events, stream_llm_phase
 from app.core.prompts.prompts import PLAN_ACT_TASK_TEMPLATE, TOOL_CALL_TEMPLATE, REFLECTION_TEMPLATE, VERIFY_TEMPLATE
@@ -72,51 +71,21 @@ class PlanActAdapter(BaseAgent):
         self.model_name = None
 
     async def _init(self, user_id: str):
-        raw_cfg = getattr(self.agent_obj, "invoke_config", None) or getattr(self.agent_obj.model, "invoke_config", None)
-        prov = getattr(self.agent_obj.model, "provider", None)
-        self.llm_client = LLMClient(user_id=str(user_id), raw_cfg=raw_cfg, provider=prov)
-        llm, ctx = await self.llm_client.init()
+        # 统一 LLM 初始化
+        self.llm_client, ctx = await LLMClient.from_agent(self.agent_obj, user_id)
         self.provider_label = ctx.provider_label
         self.model_name = ctx.model_name
 
-        # 加载工具
+        # 统一工具加载（支持默认工具回退）
         tools_records = getattr(self.agent_obj, "tools", []) or []
-        loaded_tools = ToolManager.load_from_records(tools_records)
-        if not loaded_tools:
-            try:
-                for name in ToolLoader.get_loaded_tools():
-                    obj = ToolLoader._load_tool_by_name(name)
-                    if obj:
-                        loaded_tools.append(obj)
-            except Exception as e:
-                logger.error(f"加载默认工具异常: {e}")
+        loaded_tools = ToolManager.load_from_records(tools_records, include_defaults=True)
         self.tools = {t.name: t for t in loaded_tools}
         self.tool_list = list(self.tools.values())
 
     async def _do_plan(self):
         tool_description_text = ToolManager.describe_tools(self.tool_list)
-        system = f"""
-你是一个智能体的“任务规划模块”（Planner）。
-你的职责是将用户任务拆分成最简洁、可执行的动作步骤列表（plan）。
-
-请严格遵守以下规则：
-
-【核心目标】
-- 生成一个可执行动作（action）序列，使整个任务得以完成。
-- 每个步骤都必须是“可执行行为（可被 Act 阶段执行）”。
-
-【步骤规则】
-1. 步骤必须是“行动（action）”，不能是“描述（description）”或“判断（check）”。
-2. 禁止生成工具不会执行的行为。
-3. 工具调用必须成为单独步骤。
-4. 不要把错误处理写入 plan。
-5. 不要生成最终输出步骤。
-6. 计划必须尽可能短，只包含“必要步骤”。
-7. 计划必须是 JSON 数组格式，如：["step1", "step2"]。
-
-【可用工具列表】（请严格参考）
-{tool_description_text}
-        """.strip()
+        # 使用统一模板
+        system = PLAN_ACT_TASK_TEMPLATE.format(tool_description=tool_description_text)
 
         prompt = f"任务：{self.memory.task}\n请直接给出 JSON 数组。"
         msg = await self.llm_client.llm.ainvoke([SystemMessage(content=system), HumanMessage(content=prompt)])
@@ -139,7 +108,8 @@ class PlanActAdapter(BaseAgent):
         history = "\n".join(
             f"[{i}] step={r.step}, result={r.tool_result}" for i, r in enumerate(self.memory.step_results)
         )
-        system = "You are an intelligent agent executor. You may call tools."
+        # 使用统一工具调用模板
+        system = TOOL_CALL_TEMPLATE
         prompt = (
             f"历史执行记录：\n{history}\n\n"
             f"当前步骤：{step}\n"
@@ -157,21 +127,7 @@ class PlanActAdapter(BaseAgent):
             tool_name = call["name"]
             args = call["args"]
             tool_obj = self.tools[tool_name]
-            secure_fields = ToolManager.get_secure_fields(tool_obj)
-            injected_params = ToolManager.get_injected_params(tool_obj)
-            runtime_params_all = (extra_context or {}).get("runtime_params") or (extra_context or {}).get("form_params") or {}
-            runtime_params_for_tool = runtime_params_all.get(tool_name, {}) if isinstance(runtime_params_all, dict) else {}
-            real_args = dict(args or {})
-            for name, p in injected_params.items():
-                raw_val = None
-                if isinstance(runtime_params_for_tool, dict) and name in runtime_params_for_tool:
-                    raw_val = runtime_params_for_tool[name]
-                elif isinstance(extra_context, dict) and name in extra_context:
-                    raw_val = extra_context[name]
-                val = ToolManager.build_injected_value(p, raw_val)
-                if val is not None:
-                    real_args[name] = val
-            masked_args = ToolManager.mask_secure(real_args, secure_fields)
+            real_args, masked_args = ToolManager.prepare_args(tool_obj, args, extra_context)
             step_result.tool_call = ToolCall(tool=tool_name, args=masked_args)
             try:
                 tool_res = await tool_obj.ainvoke(real_args)
@@ -338,21 +294,7 @@ class PlanActAdapter(BaseAgent):
                         step_result.reasoning = reasoning
                         step_result.tool_result = reasoning
                     else:
-                        secure_fields = ToolManager.get_secure_fields(tool_obj)
-                        injected_params = ToolManager.get_injected_params(tool_obj)
-                        runtime_params_all = extra_ctx.get("runtime_params") or extra_ctx.get("form_params") or {}
-                        runtime_params_for_tool = runtime_params_all.get(tool_name, {}) if isinstance(runtime_params_all, dict) else {}
-                        real_args = dict(args or {})
-                        for name, p in injected_params.items():
-                            raw_val = None
-                            if isinstance(runtime_params_for_tool, dict) and name in runtime_params_for_tool:
-                                raw_val = runtime_params_for_tool[name]
-                            elif isinstance(extra_ctx, dict) and name in extra_ctx:
-                                raw_val = extra_ctx[name]
-                            val = ToolManager.build_injected_value(p, raw_val)
-                            if val is not None:
-                                real_args[name] = val
-                        masked_args = ToolManager.mask_secure(real_args, secure_fields)
+                        real_args, masked_args = ToolManager.prepare_args(tool_obj, args, extra_ctx)
                         step_result.tool_call = ToolCall(tool=tool_name, args=masked_args)
                         events, tool_res = await run_tool_with_events(tool_obj, real_args=real_args, masked_args=masked_args)
                         for e in events:
