@@ -3,3 +3,4 @@ theme:
   name: material
 nav:
   - 首页: index.md
+  - 架构: architecture.md

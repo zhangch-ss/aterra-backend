@@ -9,8 +9,8 @@ from app.schemas.common import IOrderEnum
 
 router = APIRouter()
 
-# 创建 Prompt
-@router.post("/create", response_model=PromptRead)
+# 创建 Prompt（RESTful）
+@router.post("", response_model=PromptRead)
 async def create_prompt(
     payload: PromptCreate,
     db: AsyncSession = Depends(get_db),
@@ -54,8 +54,8 @@ async def delete_prompt(
     await crud_prompt.remove(id=prompt_id, db_session=db)
     return {"message": "删除成功"}
 
-# 获取某用户的 Prompt 列表（支持过滤）
-@router.get("/list", response_model=list[PromptRead])
+# 获取当前用户的 Prompt 列表（支持过滤）（RESTful）
+@router.get("", response_model=list[PromptRead])
 async def list_prompts(
     role: str | None = None,
     scene: str | None = None,
@@ -80,31 +80,7 @@ async def list_prompts(
     )
     return prompts
 
-# 兼容旧路径：/list_prompts
-@router.get("/list_prompts", response_model=list[PromptRead])
-async def list_prompts_alias(
-    role: str | None = None,
-    scene: str | None = None,
-    keyword: str | None = None,
-    page: int = 1,
-    page_size: int = 20,
-    order_by: str | None = None,
-    order: IOrderEnum = IOrderEnum.ascendent,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    prompts = await crud_prompt.search(
-        user_id=current_user.id,
-        role=role,
-        scene=scene,
-        keyword=keyword,
-        page=page,
-        page_size=page_size,
-        order_by=order_by,
-        order=order,
-        db_session=db,
-    )
-    return prompts
+## 移除旧的 /list_prompts 兼容路径（不再兼容旧接口）
 
 # 提示词类型枚举（兼容旧接口）
 @router.get("/prompt_type", response_model=list[str])

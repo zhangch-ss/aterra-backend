@@ -5,20 +5,25 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool
 
-DB_POOL_SIZE = 83
-WEB_CONCURRENCY = 9
-POOL_SIZE = max(DB_POOL_SIZE // WEB_CONCURRENCY, 5)
+# Use pool sizing derived from settings to avoid duplication.
+# settings provides DB_POOL_SIZE, WEB_CONCURRENCY and POOL_SIZE.
 
-connect_args = {"check_same_thread": False}
+common_engine_kwargs = {
+    "echo": False,
+}
+
+# Main application engine
+engine_pool_kwargs = {}
+if settings.MODE != ModeEnum.testing and isinstance(getattr(settings, "POOL_SIZE", None), int):
+    # Only set pool_size when a concrete int is provided
+    engine_pool_kwargs["pool_size"] = int(settings.POOL_SIZE)  # type: ignore[arg-type]
 
 engine = create_async_engine(
     str(settings.ASYNC_DATABASE_URI),
-    echo=False,
-    poolclass=NullPool
-    if settings.MODE == ModeEnum.testing
-    else AsyncAdaptedQueuePool,  # Asincio pytest works with NullPool
-    # pool_size=POOL_SIZE,
-    # max_overflow=64,
+    poolclass=(NullPool if settings.MODE == ModeEnum.testing else AsyncAdaptedQueuePool),
+    # Apply unified pool sizing from settings when using a QueuePool variant
+    **engine_pool_kwargs,
+    **common_engine_kwargs,
 )
 
 SessionLocal = sessionmaker(
@@ -29,20 +34,4 @@ SessionLocal = sessionmaker(
     expire_on_commit=False,
 )
 
-engine_celery = create_async_engine(
-    str(settings.ASYNC_CELERY_BEAT_DATABASE_URI),
-    echo=False,
-    poolclass=NullPool
-    if settings.MODE == ModeEnum.testing
-    else AsyncAdaptedQueuePool,  # Asincio pytest works with NullPool
-    # pool_size=POOL_SIZE,
-    # max_overflow=64,
-)
-
-SessionLocalCelery = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine_celery,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+# Removed legacy Celery-specific engine and session factory (unused)

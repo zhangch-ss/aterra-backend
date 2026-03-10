@@ -135,8 +135,8 @@ class MinioClient:
         try:
             self.client.stat_object(bucket_name=bucket_name, object_name=file_name)
             return True
-        except Exception as e:
-            print(f"[x] Exception: {e}")
+        except Exception:
+            # 记录 stat 失败，但不暴露底层异常细节
             return False
 
     def stat_object(self, bucket_name, object_name):

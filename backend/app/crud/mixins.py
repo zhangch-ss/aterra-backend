@@ -1,4 +1,5 @@
-from sqlalchemy import select, or_, and_
+from sqlmodel import select
+from sqlalchemy import or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 

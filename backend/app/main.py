@@ -1,13 +1,10 @@
 from fastapi import (
     FastAPI,
 )
-from fastapi_async_sqlalchemy import SQLAlchemyMiddleware
-from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool
 from starlette.middleware.cors import CORSMiddleware
 
 from app.api.v1.api import api_router as api_router_v1
-from app.core.config import ModeEnum, settings
-from app.utils.fastapi_globals import GlobalsMiddleware
+from app.core.config import settings
 from app.core.tool.tool_watcher import start_tool_watcher, stop_tool_watcher
 from contextlib import asynccontextmanager
 from app.db.session import SessionLocal
@@ -17,6 +14,11 @@ from app.core.tool.tool_loader import ToolLoader
 from app.core.tool.tool_registry import sync_scanned_tools
 from fastapi.responses import JSONResponse
 from app.utils.logger import setup_logger
+from starlette.concurrency import run_in_threadpool
+from sqlalchemy import text
+from app.utils.token_store import get_redis_client
+import requests
+from urllib.parse import urlparse
 
 
 # Basic health/ready endpoints
@@ -77,21 +79,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-
-app.add_middleware(
-    SQLAlchemyMiddleware,
-    db_url=str(settings.ASYNC_DATABASE_URI),
-    engine_args={
-        "echo": False,
-        "poolclass": NullPool
-        if settings.MODE == ModeEnum.testing
-        else AsyncAdaptedQueuePool
-        # "pool_pre_ping": True,
-        # "pool_size": settings.POOL_SIZE,
-        # "max_overflow": 64,
-    },
-)
-# app.add_middleware(GlobalsMiddleware)  # Temporarily disabled to resolve request scope assertion
+# Removed SQLAlchemyMiddleware: standardized on explicit AsyncSession dependency via get_db
 
 # Set all CORS origins enabled
 if settings.BACKEND_CORS_ORIGINS:
@@ -120,8 +108,54 @@ async def healthz():
 
 @app.get("/readyz", include_in_schema=False)
 async def readyz():
-    # 若需要，可在此增加对数据库/缓存/对象存储等的探测
-    return _ok({"version": settings.API_VERSION})
+    """Lightweight readiness probe checking DB, Redis and MinIO health.
+    Returns 200 when all dependencies are healthy; otherwise 503 with details.
+    """
+    status = {
+        "version": settings.API_VERSION,
+        "db": "unknown",
+        "redis": "unknown",
+        "minio": "unknown",
+    }
+    ok = True
+
+    # 1) DB check
+    try:
+        async with SessionLocal() as session:
+            await session.exec(text("SELECT 1"))
+        status["db"] = "ok"
+    except Exception as e:
+        status["db"] = f"error: {e.__class__.__name__}"
+        ok = False
+
+    # 2) Redis check
+    try:
+        redis = get_redis_client()
+        pong = await redis.ping()
+        status["redis"] = "ok" if pong else "error: no-pong"
+        if not pong:
+            ok = False
+    except Exception as e:
+        status["redis"] = f"error: {e.__class__.__name__}"
+        ok = False
+
+    # 3) MinIO health check via /minio/health/live
+    try:
+        internal = getattr(settings, "MINIO_INTERNAL_URL", None) or "minio:9000"
+        parsed = urlparse(internal if "://" in internal else f"http://{internal}")
+        hostport = parsed.netloc or parsed.path
+        url = f"http://{hostport}/minio/health/live"
+        resp = await run_in_threadpool(requests.get, url, timeout=5)
+        status["minio"] = "ok" if resp.ok else f"error: http-{resp.status_code}"
+        if not resp.ok:
+            ok = False
+    except Exception as e:
+        status["minio"] = f"error: {e.__class__.__name__}"
+        ok = False
+
+    if ok:
+        return _ok(status)
+    return JSONResponse(status_code=503, content={"status": "error", **status})
 
 # Add Routers
 app.include_router(api_router_v1, prefix=settings.API_V1_STR)

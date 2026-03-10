@@ -13,7 +13,6 @@ from app.crud.model_crud import crud_model
 from app.models.model import Model
 from app.schemas.model import InvokeConfig, ModelCreateInput, ModelUpdate
 from app.utils.credentials_store import (
-    get_redis_client,
     store_provider_credentials as _store_provider_credentials,
     get_provider_credentials as _get_provider_credentials,
     delete_provider_credentials as _delete_provider_credentials,
@@ -128,11 +127,9 @@ class ModelService:
         await crud_model.remove(id=model_id, db_session=db_session)
         return True
 
-    # Credentials management (backed by Redis via utils.credentials_store)
+    # Credentials management (backed by PostgreSQL via utils.credentials_store)
     async def set_provider_credentials(self, user_id: str, provider: str, payload: ProviderCredentialsInput) -> None:
-        redis = get_redis_client()
         await _store_provider_credentials(
-            redis,
             user_id=user_id,
             provider=provider,
             api_key=payload.api_key,
@@ -144,12 +141,10 @@ class ModelService:
         )
 
     async def get_provider_credentials(self, user_id: str, provider: str, reveal_secret: bool = False) -> dict[str, Any]:
-        redis = get_redis_client()
-        return await _get_provider_credentials(redis, user_id=user_id, provider=provider, reveal_secret=reveal_secret)
+        return await _get_provider_credentials(user_id=user_id, provider=provider, reveal_secret=reveal_secret)
 
     async def delete_provider_credentials(self, user_id: str, provider: str) -> None:
-        redis = get_redis_client()
-        await _delete_provider_credentials(redis, user_id=user_id, provider=provider)
+        await _delete_provider_credentials(user_id=user_id, provider=provider)
 
     # Verification logic
     async def verify_model(
@@ -205,12 +200,14 @@ class ModelService:
         organization = creds.get("organization") or (cfg.client.organization if getattr(cfg, "client", None) else None)
         azure_endpoint = creds.get("azure_endpoint") or (cfg.client.azure_endpoint if getattr(cfg, "client", None) else None)
         temperature=1
+        max_completion_tokens: int | None = None
         try:
             if cfg and getattr(cfg, "parameters", None) and cfg.parameters.temperature is not None:
                 temperature = float(cfg.parameters.temperature)
             if cfg and getattr(cfg, "parameters", None) and cfg.parameters.max_completion_tokens is not None:
                 max_completion_tokens = int(cfg.parameters.max_completion_tokens)
         except Exception:
+            # 忽略清洗/类型转换异常，保持默认参数
             pass
         p_lower = prov.lower()
         # Normalize Azure endpoint regardless of source (creds or client), strip any '/openai...' suffix
@@ -220,12 +217,6 @@ class ModelService:
             else:
                 azure_endpoint = self.derive_azure_endpoint(base_url)
         api_version = creds.get("api_version") or (cfg.client.api_version if getattr(cfg, "client", None) else None)
-        if not api_version and p_lower in ("azure", "azure-openai"):
-            try:
-                api_version = settings.OPENAI_API_VERSION
-            except Exception:
-                api_version = None
-
 
         start = time.time()
         p = prov.lower()
@@ -234,12 +225,14 @@ class ModelService:
                 return {"ok": False, "provider": prov, "model": cfg.name, "error": "Missing provider API key"}
             client = OpenAI(api_key=api_key, base_url=base_url, organization=organization)
             def _call():
-                return client.chat.completions.create(
-                    model=cfg.name,
-                    messages=[{"role": "user", "content": "ping"}],
-                    temperature=temperature,
-                    max_completion_tokens=max_completion_tokens,
-                )
+                kwargs: dict[str, Any] = {
+                    "model": cfg.name,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "temperature": temperature,
+                }
+                if max_completion_tokens is not None:
+                    kwargs["max_completion_tokens"] = max_completion_tokens
+                return client.chat.completions.create(**kwargs)
             await run_in_threadpool(_call)
         elif p in ("azure", "azure-openai"):
             if not api_key or not azure_endpoint or not api_version:
@@ -252,12 +245,13 @@ class ModelService:
             deployment_name = creds.get("azure_deployment") or cfg.name
             client = AzureOpenAI(azure_endpoint=azure_endpoint, api_key=api_key, api_version=api_version)
             def _call():
-                return client.chat.completions.create(
-                    model=deployment_name,
-                    messages=[{"role": "user", "content": "ping"}],
-                    temperature=temperature,
-                    max_completion_tokens=max_completion_tokens
-                )
+                kwargs: dict[str, Any] = {
+                    "model": deployment_name,
+                    "messages": [{"role": "user", "content": "ping"}],
+                }
+                if max_completion_tokens is not None:
+                    kwargs["max_completion_tokens"] = max_completion_tokens
+                return client.chat.completions.create(**kwargs)
             await run_in_threadpool(_call)
         else:
             return {"ok": False, "error": f"Unsupported provider: {prov}"}

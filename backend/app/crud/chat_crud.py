@@ -96,11 +96,15 @@ class CRUDChat(CRUDBase[ChatSession, SessionCreate, SessionUpdate]):
         self,
         *,
         session_in: SessionCreate,
+        user_id: str,
         db_session: Optional[AsyncSession] = None,
     ) -> ChatSession:
-        """创建新的聊天会话"""
+        """创建新的聊天会话，服务端绑定所属用户"""
         db_session = db_session or self.db.session
-        db_obj = ChatSession(**session_in.model_dump())
+        payload = session_in.model_dump()
+        # 仅允许可写的字段，强制绑定 user_id
+        title = payload.get("title")
+        db_obj = ChatSession(user_id=user_id, title=title or "未命名会话")
 
         try:
             db_session.add(db_obj)

@@ -1,12 +1,23 @@
 from fastapi.encoders import jsonable_encoder
 from typing import TypeVar
 from sqlmodel import SQLModel
+from app.utils.logger import setup_logger
 
 ModelType = TypeVar("ModelType", bound=SQLModel)
 
 
-def print_model(text: str = "", model: ModelType = []):
+logger = setup_logger(__name__)
+
+
+def print_model(text: str = "", model: ModelType | list[ModelType] | dict | None = None):
     """
-    It prints sqlmodel responses for complex relationship models.
+    Debug helper for SQLModel responses with relationships.
+    Replaced side-effecting print with structured logging and return value.
     """
-    return print(text, jsonable_encoder(model))
+    payload = jsonable_encoder(model)
+    try:
+        logger.debug("%s %s", text, payload)
+    except Exception:
+        # logging failure should not break callers
+        pass
+    return payload

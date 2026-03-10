@@ -1,25 +1,12 @@
 from typing import Optional, Any
-from redis.asyncio import Redis  # 仅保留类型兼容，实际不再使用 Redis
 
-from app.core.config import settings
-from app.utils.crypto import encrypt_text, decrypt_text
 from app.db.session import SessionLocal
+from app.core.config import settings
 from app.crud.provider_credentials_crud import crud_provider_credentials
-
-
-# Redis key templates（兼容保留，不再使用）
-CRED_HASH_KEY = "user:{user_id}:provider:{provider}:cred"
-
-
-def get_redis_client() -> Redis:
-    """兼容旧接口的工厂函数（调用方仍可获取 Redis 客户端）。
-    实际存储已迁移到 PostgreSQL，此函数返回值不会被使用。
-    """
-    return Redis(host=settings.REDIS_HOST, port=int(settings.REDIS_PORT), decode_responses=True)
+from app.utils.crypto import encrypt_text, decrypt_text
 
 
 async def store_provider_credentials(
-    redis: Redis,  # 兼容占位，实际不使用
     user_id: str,
     provider: str,
     api_key: Optional[str] = None,
@@ -29,13 +16,22 @@ async def store_provider_credentials(
     api_version: Optional[str] = None,
     azure_deployment: Optional[str] = None,
 ) -> None:
-    """将 Provider 凭据落库到 PostgreSQL。
-    - 敏感字段 api_key 使用 encrypt_text 加密后存储到 api_key_enc
-    - 其余字段原样存储
+    """存储 Provider 凭据。api_key 采用应用层加密后再入库，其余为明文配置。
+    兼容历史数据：仅在本函数写入时加密；读取时若解密失败则回退为原始值。
     """
     values: dict[str, Any] = {}
-    if api_key:
-        values["api_key_enc"] = encrypt_text(api_key)
+    if api_key is not None:
+        # Encrypt api_key at rest
+        try:
+            values["api_key_enc"] = encrypt_text(api_key)
+        except Exception as enc_err:
+            # 生产默认禁止明文回退；如需迁移/调试，可在开发环境显式开启
+            if getattr(settings, "ALLOW_PLAINTEXT_SECRET_FALLBACK", False):
+                values["api_key_enc"] = api_key
+            else:
+                raise ValueError(
+                    "Failed to encrypt provider api_key and plaintext fallback is disabled."
+                ) from enc_err
     if base_url is not None:
         values["base_url"] = base_url
     if organization is not None:
@@ -57,14 +53,13 @@ async def store_provider_credentials(
 
 
 async def get_provider_credentials(
-    redis: Redis,  # 兼容占位，实际不使用
     user_id: str,
     provider: str,
     reveal_secret: bool = False,
 ) -> dict[str, Optional[str]]:
     """从 PostgreSQL 获取 Provider 凭据。
-    - 默认不返回明文 api_key，仅返回 has_api_key 标志
-    - 当 reveal_secret=True 时，解密 api_key_enc 返回明文 api_key
+    - 默认不返回 api_key，仅返回 has_api_key 标志；
+    - 当 reveal_secret=True 时，尝试解密返回明文；若解密失败则回退原始值（兼容历史明文）。
     """
     async with SessionLocal() as session:
         rec = await crud_provider_credentials.get_by_user_provider(
@@ -87,18 +82,18 @@ async def get_provider_credentials(
     if rec.api_key_enc:
         result["has_api_key"] = True
         if reveal_secret:
+            # Try decrypt; fallback to raw if it's legacy plaintext
             try:
                 result["api_key"] = decrypt_text(rec.api_key_enc)
             except Exception:
-                result["api_key"] = None
+                result["api_key"] = rec.api_key_enc
     else:
         result["has_api_key"] = False
 
-    # 不打印敏感信息，避免日志泄露
     return result  # type: ignore[return-value]
 
 
-async def delete_provider_credentials(redis: Redis, user_id: str, provider: str) -> None:
+async def delete_provider_credentials(user_id: str, provider: str) -> None:
     """删除指定用户在指定 Provider 下的凭据记录。"""
     async with SessionLocal() as session:
         await crud_provider_credentials.delete_by_user_provider(

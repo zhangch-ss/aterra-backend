@@ -9,16 +9,14 @@ def strip_json_block(text: str) -> str:
     return text
 
 if __name__ == "__main__":
-    
-    text = """
+    # Example usage for local testing
+    sample = """
     ```json
     {
-    "is_complete": false,
-    "need_replan": false,
-    "need_react": false,
-    "summary": "当前步骤成功完成，需继续执行下一步生成空间分析结论。"
+      "ok": true
     }
-
-    ```"""
-
-    print(strip_json_block(text))
+    ```
+    """
+    # Avoid stdout noise in production code paths
+    cleaned = strip_json_block(sample)
+    # Intentionally no print here

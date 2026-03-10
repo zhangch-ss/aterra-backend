@@ -1,7 +1,6 @@
 FROM python:3.11-slim
 
 # 1. 保持官方 Debian 源（禁用镜像源替换以避免 502/未签名问题）
-# 原镜像源替换已移除
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_DEFAULT_TIMEOUT=100 \

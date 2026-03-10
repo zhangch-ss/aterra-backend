@@ -30,8 +30,8 @@ services:
     image: redis:alpine
     container_name: redis_server
     restart: always
-    expose:
-      - 6379
+    ports:
+      - "6379:6379"
 
   # =====================================================
   # MinIO（系统唯一 MinIO）
@@ -73,8 +73,12 @@ services:
           alembic upgrade head &&
           uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
         "
-    env_file: "../.env"
+    env_file: ".env"
     environment:
+      - DATABASE_HOST=database
+      - DATABASE_PORT=5432
+      - REDIS_HOST=redis_server
+      - REDIS_PORT=6379
       - MILVUS_HOST=host.docker.internal
       - MILVUS_PORT=19530
       - MINIO_INTERNAL_URL=minio:9000

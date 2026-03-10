@@ -24,11 +24,18 @@ def _safe_get_tool_schema(args_schema) -> dict:
 
 
 def extract_tool_schema(tool_obj) -> tuple[dict, str | None]:
-    """从工具对象提取 LLM 入参 schema 以及推断的版本。"""
+    """从工具对象提取 LLM 入参 schema 以及推断的版本。
+    总是返回 (schema: dict, version: Optional[str]) 元组。
+    版本为 schema 的稳定哈希；若无 schema 则为 None。
+    """
     try:
         args_schema = getattr(tool_obj, "args_schema", None)
         schema = _safe_get_tool_schema(args_schema)
-        return schema or {}
+        version: str | None = None
+        if schema:
+            payload = json.dumps(schema, ensure_ascii=False, sort_keys=True)
+            version = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        return schema or {}, version
     except Exception:
         return {}, None
 

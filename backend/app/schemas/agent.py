@@ -20,7 +20,6 @@ class AgentBase(BaseModel):
 
 # ======== 创建 ========
 class AgentCreate(AgentBase):
-    user_id: str
     model_id: Optional[str] = None
     invoke_config: Optional[InvokeConfig] = None
     parent_agent_id: Optional[str] = None

@@ -19,28 +19,25 @@ class Settings(BaseSettings):
     API_VERSION: str = "v1"
     API_V1_STR: str = f"/api/{API_VERSION}"
     PROJECT_NAME: str
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 1  # 1 hour
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 8  # 1 hour
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 100  # 100 days
-    OPENAI_API_KEY: str
-    OPENAI_API_VERSION: str
-    AZURE_OPENAI_ENDPOINT: str
     DATABASE_USER: str
     DATABASE_PASSWORD: str
     DATABASE_HOST: str
     DATABASE_PORT: int
     DATABASE_NAME: str
-    DATABASE_CELERY_NAME: str = "celery_schedule_jobs"
     REDIS_HOST: str
     REDIS_PORT: str
     DB_POOL_SIZE: int = 83
     WEB_CONCURRENCY: int = 9
-    POOL_SIZE: int = max(DB_POOL_SIZE // WEB_CONCURRENCY, 5)
+    # Derive POOL_SIZE from DB_POOL_SIZE and WEB_CONCURRENCY when not explicitly provided.
+    # Using a validator below ensures env overrides are respected.
+    POOL_SIZE: int | None = None
     ASYNC_DATABASE_URI: PostgresDsn | str = ""
 
     # Tool integration configuration
     TOOL_PACKAGES: list[str] | None = [
-        "app.core.tool.tools",
-        "app.core.tool.exec",
+        "app.core.tool.tools"
     ]
     # 控制启动时是否自动扫描工具并同步写库（默认关闭，改为手动入库+按需加载）
     TOOL_AUTO_SCAN_ON_START: bool = False
@@ -48,6 +45,19 @@ class Settings(BaseSettings):
     TOOL_WATCHER_ENABLE: bool = False
     # Cross-platform work directory for agent backends
     WORK_DIR: str = str(Path(__file__).parent.parent.parent / "work")
+
+    # Local auth bypass (for development convenience only)
+    # When enabled in development mode, endpoints using get_current_user will bypass
+    # token verification and use/auto-create a local debug user.
+    AUTH_LOCAL_MODE: bool = False
+    AUTH_LOCAL_USERNAME: str | None = "local"
+    AUTH_LOCAL_EMAIL: str | None = "local@example.com"
+    AUTH_LOCAL_IS_SUPERUSER: bool = True
+
+    # Security hardening for provider credentials storage
+    # When False (default), encryption failures will NOT fallback to plaintext storage.
+    # Set to True only in controlled dev environments to allow legacy/plaintext migration.
+    ALLOW_PLAINTEXT_SECRET_FALLBACK: bool = False
 
     @field_validator("ASYNC_DATABASE_URI", mode="after")
     def assemble_db_connection(cls, v: str | None, info: FieldValidationInfo) -> Any:
@@ -63,58 +73,17 @@ class Settings(BaseSettings):
                 )
         return v
 
-    SYNC_CELERY_DATABASE_URI: PostgresDsn | str = ""
-
-    @field_validator("SYNC_CELERY_DATABASE_URI", mode="after")
-    def assemble_celery_db_connection(
-        cls, v: str | None, info: FieldValidationInfo
-    ) -> Any:
-        if isinstance(v, str):
-            if v == "":
-                return PostgresDsn.build(
-                    scheme="postgresql+asyncpg",
-                    username=info.data["DATABASE_USER"],
-                    password=info.data["DATABASE_PASSWORD"],
-                    host=info.data["DATABASE_HOST"],
-                    port=info.data["DATABASE_PORT"],
-                    path=info.data["DATABASE_CELERY_NAME"],
-                )
-        return v
-
-    SYNC_CELERY_BEAT_DATABASE_URI: PostgresDsn | str = ""
-
-    @field_validator("SYNC_CELERY_BEAT_DATABASE_URI", mode="after")
-    def assemble_celery_beat_db_connection(
-        cls, v: str | None, info: FieldValidationInfo
-    ) -> Any:
-        if isinstance(v, str):
-            if v == "":
-                return PostgresDsn.build(
-                    scheme="postgresql+psycopg2",
-                    username=info.data["DATABASE_USER"],
-                    password=info.data["DATABASE_PASSWORD"],
-                    host=info.data["DATABASE_HOST"],
-                    port=info.data["DATABASE_PORT"],
-                    path=info.data["DATABASE_CELERY_NAME"],
-                )
-        return v
-
-    ASYNC_CELERY_BEAT_DATABASE_URI: PostgresDsn | str = ""
-
-    @field_validator("ASYNC_CELERY_BEAT_DATABASE_URI", mode="after")
-    def assemble_async_celery_beat_db_connection(
-        cls, v: str | None, info: FieldValidationInfo
-    ) -> Any:
-        if isinstance(v, str):
-            if v == "":
-                return PostgresDsn.build(
-                    scheme="postgresql+asyncpg",
-                    username=info.data["DATABASE_USER"],
-                    password=info.data["DATABASE_PASSWORD"],
-                    host=info.data["DATABASE_HOST"],
-                    port=info.data["DATABASE_PORT"],
-                    path=info.data["DATABASE_CELERY_NAME"],
-                )
+    # Derive POOL_SIZE after settings are loaded if not provided explicitly
+    @field_validator("POOL_SIZE", mode="after")
+    def derive_pool_size(cls, v: int | None, info: FieldValidationInfo) -> int | None:
+        if v is None:
+            try:
+                db_pool_size = int(info.data.get("DB_POOL_SIZE"))
+                web_conc = int(info.data.get("WEB_CONCURRENCY")) or 1
+                return max(db_pool_size // max(web_conc, 1), 5)
+            except Exception:
+                # If any issue, keep None so engine uses defaults
+                return None
         return v
 
     FIRST_SUPERUSER_EMAIL: EmailStr
@@ -134,11 +103,9 @@ class Settings(BaseSettings):
     MILVUS_DB: str | None = None
     MILVUS_TLS: bool = False
 
-    WHEATER_URL: AnyHttpUrl
-
     SECRET_KEY: str = secrets.token_urlsafe(32)
     ENCRYPT_KEY: str = secrets.token_urlsafe(32)
-    # 默认不放开 CORS，需在环境变量中显式配置（例如："http://localhost:3000,http://127.0.0.1:3000"）
+    # 默认不放开 CORS，需在环境变量中显式配置（例如："["http://localhost:3000","http://127.0.0.1:3000"]"）
     BACKEND_CORS_ORIGINS: list[str] | list[AnyHttpUrl] = []
 
     @field_validator("BACKEND_CORS_ORIGINS")
@@ -158,6 +125,17 @@ class Settings(BaseSettings):
         ),
         extra="ignore",
     )
+
+    # Enforce SECRET_KEY must be explicitly provided in production
+    @field_validator("SECRET_KEY", mode="after")
+    def validate_secret_key(cls, v: str, info: FieldValidationInfo) -> str:
+        try:
+            mode = info.data.get("MODE")
+        except Exception:
+            mode = None
+        if str(mode) == ModeEnum.production and not os.getenv("SECRET_KEY"):
+            raise ValueError("SECRET_KEY must be provided via environment variable in production")
+        return v
 
 
 settings = Settings()  # type: ignore

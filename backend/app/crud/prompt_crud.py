@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
+from sqlmodel import select
+from sqlalchemy import and_, or_
 from app.crud.base_crud import CRUDBase
 from app.crud.mixins import CRUDUserFilterMixin
 from app.models.prompt import Prompt
