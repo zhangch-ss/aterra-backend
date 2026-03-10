@@ -14,21 +14,21 @@ flowchart LR
 
   FE -- REST/SSE --> API[FastAPI /api/v1]
 
-  subgraph Application[Application Layer]
+  subgraph Application Layer
     AR[Agent Registry]
-    ORC[Agent Orchestrator (SSE)]
+    ORC[Agent Orchestrator SSE]
     TL[ToolLoader / SchemaExtractor]
     RAG[RAG Pipeline]
   end
 
   API --> AR
   AR --> ORC
-  ORC -->|events: token/tool/tool_msg/final| FE
+  ORC -->|events: token, tool, tool_msg, final| FE
   AR -. bind .-> TL
   AR -. use .-> RAG
 
-  subgraph Core[Core Services]
-    SEC[Auth & Token (Redis Blacklist)]
+  subgraph Core Services
+    SEC[Auth & Token - Redis Blacklist]
     LLM[LLM Factory / Embeddings]
   end
 
@@ -36,7 +36,7 @@ flowchart LR
   ORC --> LLM
   RAG --> LLM
 
-  subgraph Storage[Storages]
+  subgraph Storages
     PG[(PostgreSQL)]
     MINIO[(MinIO)]
     MILVUS[(Milvus)]
@@ -49,13 +49,14 @@ flowchart LR
   RAG <--> MILVUS
   SEC <--> REDIS
 
-  subgraph Tools[Tools]
+  subgraph Tools
     T1[LangChain BaseTool]
     T2[StructuredTool]
   end
   TL --> T1
   TL --> T2
-  ORC -->|invoke| Tools
+  ORC -->|invoke| T1
+  ORC -->|invoke| T2
 ```
 
 要点：
