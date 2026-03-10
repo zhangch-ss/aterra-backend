@@ -91,6 +91,8 @@ earthengine-api = "^1.7.3"
 colorlog = "^6.10.1"
 langgraph = "^1.0.5"
 uvicorn = "^0.38.0"
+mkdocs = "^1.6.1"
+mkdocs-material = "^9.7.4"
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.1.0"

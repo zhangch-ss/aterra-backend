@@ -105,7 +105,7 @@ class Settings(BaseSettings):
 
     SECRET_KEY: str = secrets.token_urlsafe(32)
     ENCRYPT_KEY: str = secrets.token_urlsafe(32)
-    # 默认不放开 CORS，需在环境变量中显式配置（例如："http://localhost:3000,http://127.0.0.1:3000"）
+    # 默认不放开 CORS，需在环境变量中显式配置（例如："["http://localhost:3000","http://127.0.0.1:3000"]"）
     BACKEND_CORS_ORIGINS: list[str] | list[AnyHttpUrl] = []
 
     @field_validator("BACKEND_CORS_ORIGINS")
